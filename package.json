@@ -1,0 +1,51 @@
+{
+  "name": "ai-landing-page-generator",
+  "version": "1.0.0",
+  "description": "AI-powered landing page generator with CRO analytics",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend/client-app",
+    "frontend/admin-app",
+    "shared"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:client\" \"npm run dev:admin\"",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:client": "cd frontend/client-app && npm run dev",
+    "dev:admin": "cd frontend/admin-app && npm run dev",
+    "build": "npm run build:shared && npm run build:backend && npm run build:client && npm run build:admin",
+    "build:backend": "cd backend && npm run build",
+    "build:client": "cd frontend/client-app && npm run build",
+    "build:admin": "cd frontend/admin-app && npm run build",
+    "build:shared": "cd shared && npm run build",
+    "test": "npm run test:backend && npm run test:client && npm run test:admin && npm run test:shared",
+    "test:backend": "cd backend && npm test",
+    "test:client": "cd frontend/client-app && npm test",
+    "test:admin": "cd frontend/admin-app && npm test",
+    "test:shared": "cd shared && npm test",
+    "install:all": "npm install && npm run install:backend && npm run install:client && npm run install:admin && npm run install:shared",
+    "install:backend": "cd backend && npm install",
+    "install:client": "cd frontend/client-app && npm install",
+    "install:admin": "cd frontend/admin-app && npm install",
+    "install:shared": "cd shared && npm install",
+    "clean": "npm run clean:backend && npm run clean:client && npm run clean:admin",
+    "clean:backend": "cd backend && rm -rf node_modules",
+    "clean:client": "cd frontend/client-app && rm -rf node_modules .next",
+    "clean:admin": "cd frontend/admin-app && rm -rf node_modules .next"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "keywords": [
+    "ai",
+    "landing-page",
+    "generator",
+    "firebase",
+    "nextjs",
+    "cro",
+    "analytics"
+  ],
+  "author": "",
+  "license": "MIT"
+}
