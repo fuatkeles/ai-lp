@@ -6,14 +6,14 @@ AI-powered landing page generator with CRO analytics, built with Next.js, Fireba
 
 ```
 ai-landing-page-generator/
-├── backend/                 # Express.js API server
+├── backend/                 # Express.js API server (port 6000)
 │   ├── api/                # API route handlers
 │   ├── services/           # Business logic services
 │   ├── middleware/         # Custom middleware
 │   └── utils/              # Backend utilities
 ├── frontend/
-│   ├── client-app/         # User-facing Next.js app (port 3000)
-│   └── admin-app/          # Admin Next.js app (port 3001)
+│   ├── client-app/         # User-facing Next.js app (port 6001)
+│   └── admin-app/          # Admin Next.js app (port 6002)
 ├── shared/                 # Shared components and utilities
 │   ├── components/         # Reusable UI components
 │   ├── utils/              # Shared utility functions
@@ -61,9 +61,24 @@ ai-landing-page-generator/
    ```
 
 This will start:
-- Backend API server on http://localhost:3000
-- Client app on http://localhost:3000 (Next.js dev server)
-- Admin app on http://localhost:3001
+- **Backend API server**: http://localhost:6000
+- **Client app**: http://localhost:6001
+- **Admin app**: http://localhost:6002
+
+### Individual Services
+
+You can also start services individually:
+
+```bash
+# Backend API (Port 6000)
+npm run dev:backend
+
+# Client App (Port 6001)
+npm run dev:client
+
+# Admin Dashboard (Port 6002)
+npm run dev:admin
+```
 
 ### Environment Variables
 

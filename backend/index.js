@@ -9,14 +9,16 @@ require('dotenv').config();
 const { initializeFirebase } = require('./services/firebaseService');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8000;
 
 // Security middleware
-app.use(helmet());
+app.use(helmet({
+  crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" }
+}));
 
 // CORS configuration
 const corsOptions = {
-  origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['http://localhost:3000', 'http://localhost:3001'],
+  origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['http://localhost:3001', 'http://localhost:3002'],
   credentials: true,
   optionsSuccessStatus: 200
 };
@@ -54,6 +56,7 @@ try {
 
 // Import API routes
 const authRoutes = require('./api/auth');
+const landingPagesRoutes = require('./api/landing-pages');
 
 // API routes
 app.get('/api', (req, res) => {
@@ -66,6 +69,9 @@ app.get('/api', (req, res) => {
 
 // Authentication routes
 app.use('/api/auth', authRoutes);
+
+// Landing pages routes
+app.use('/api/landing-pages', landingPagesRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

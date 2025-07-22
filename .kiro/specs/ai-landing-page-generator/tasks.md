@@ -57,7 +57,12 @@
   - Protected routes middleware'ini yaz
   - _Requirements: 3.1, 3.2, 3.4_
 
-- [ ] 5. Kimi K2 AI service entegrasyonunu yap
+- [x] 5. Kimi K2 AI service entegrasyonunu yap
+
+
+
+
+
   - Kimi K2 API client service'ini oluştur
   - Prompt validation ve processing fonksiyonlarını yaz
   - AI response parsing ve error handling'i implement et

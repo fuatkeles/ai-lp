@@ -23,7 +23,7 @@ export const AuthProvider = ({ children }) => {
   const [error, setError] = useState('');
 
   // API base URL
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
   // Sign in with Google
   const signInWithGoogle = async () => {
