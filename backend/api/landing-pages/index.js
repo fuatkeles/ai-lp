@@ -1,10 +1,19 @@
 const express = require('express');
 const router = express.Router();
 const { generateLandingPage } = require('../../services/kimiService');
-const { processLandingPageRequest, checkContentPolicy } = require('../../utils/promptProcessor');
+const { processLandingPageRequest, checkContentPolicy, validatePromptQuality } = require('../../utils/promptProcessor');
 const { parseAIResponse, validateParsedContent } = require('../../utils/aiResponseParser');
+const { validateLandingPageData, validateGeneratedCode } = require('../../utils/validation');
 const { getFirestore } = require('../../services/firebaseService');
 const { verifyJWTToken } = require('../../services/authService');
+const {
+  createLandingPage,
+  getLandingPageById,
+  getUserLandingPages,
+  updateLandingPage,
+  deleteLandingPage,
+  getLandingPageAnalytics
+} = require('../../services/landingPageService');
 
 // Middleware to verify authentication
 const requireAuth = (req, res, next) => {
@@ -50,7 +59,18 @@ router.post('/generate', requireAuth, async (req, res) => {
     console.log(`Landing page generation request from user: ${req.user.uid}`);
     
     // Process and validate the request
-    const processResult = processLandingPageRequest(req.body);
+    const requestData = {
+      prompt: req.body.prompt,
+      title: req.body.title,
+      options: {
+        industry: req.body.businessType,
+        targetAudience: req.body.targetAudience,
+        callToAction: req.body.callToAction,
+        model: req.body.model
+      }
+    };
+    
+    const processResult = processLandingPageRequest(requestData);
     if (!processResult.success) {
       return res.status(400).json(processResult);
     }
@@ -69,9 +89,10 @@ router.post('/generate', requireAuth, async (req, res) => {
       });
     }
     
-    // Generate landing page using AI
-    console.log('Calling Kimi AI service...');
-    const aiResult = await generateLandingPage(enhancedPrompt, options);
+    // Generate landing page using selected AI model
+    const selectedModel = req.body.model || 'gemini';
+    console.log(`Calling ${selectedModel.toUpperCase()} AI service...`);
+    const aiResult = await generateLandingPage(enhancedPrompt, { ...options, model: selectedModel });
     
     if (!aiResult.success) {
       console.error('AI generation failed:', aiResult.error);
@@ -96,11 +117,23 @@ router.post('/generate', requireAuth, async (req, res) => {
     // Validate parsed content
     const validationResult = validateParsedContent(parseResult.data);
     
-    // Save to Firestore
+    // Validate generated code quality
+    const codeValidation = validateGeneratedCode(parseResult.data);
+    if (!codeValidation.isValid) {
+      console.error('Generated code validation failed:', codeValidation.errors);
+      return res.status(500).json({
+        success: false,
+        error: {
+          code: 'CODE_VALIDATION_FAILED',
+          message: 'Generated code quality is insufficient',
+          details: codeValidation.errors
+        }
+      });
+    }
+    
+    // Save to Firestore using landing page service
     console.log('Saving landing page to database...');
-    const db = getFirestore();
     const landingPageData = {
-      userId: req.user.uid,
       title: title,
       prompt: req.body.prompt,
       enhancedPrompt: enhancedPrompt,
@@ -109,37 +142,30 @@ router.post('/generate', requireAuth, async (req, res) => {
         css: parseResult.data.css,
         javascript: parseResult.data.javascript
       },
-      status: 'draft',
-      url: null, // Will be set when published
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      analytics: {
-        views: 0,
-        conversions: 0,
-        bounceRate: 0,
-        avgTimeOnPage: 0
-      },
       aiMetadata: {
         model: aiResult.data.metadata.model,
         processingTime: aiResult.data.metadata.processingTime,
         tokens: aiResult.data.metadata.tokens,
         parseMethod: parseResult.data.metadata.parseMethod,
         ...metadata
-      },
-      validation: validationResult.success ? validationResult.validation : null,
-      recommendations: validationResult.success ? validationResult.recommendations : []
+      }
     };
     
-    const docRef = await db.collection('landingPages').add(landingPageData);
-    const savedPage = { id: docRef.id, ...landingPageData };
+    const createResult = await createLandingPage(landingPageData, req.user.uid);
     
-    console.log(`Landing page created successfully: ${docRef.id}`);
+    if (!createResult.success) {
+      console.error('Failed to create landing page:', createResult.error);
+      return res.status(500).json(createResult);
+    }
+    
+    const savedPage = createResult.data;
+    console.log(`Landing page created successfully: ${savedPage.id}`);
     
     // Return success response
     res.status(201).json({
       success: true,
       data: {
-        id: docRef.id,
+        id: savedPage.id,
         title: savedPage.title,
         status: savedPage.status,
         generatedCode: savedPage.generatedCode,
@@ -166,59 +192,23 @@ router.post('/generate', requireAuth, async (req, res) => {
 // GET /api/landing-pages/list - Get user's landing pages
 router.get('/list', requireAuth, async (req, res) => {
   try {
-    const db = getFirestore();
-    const { page = 1, limit = 10, status } = req.query;
+    const { page = 1, limit = 10, status, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
     
-    let query = db.collection('landingPages')
-      .where('userId', '==', req.user.uid)
-      .orderBy('createdAt', 'desc');
+    const options = {
+      page: parseInt(page),
+      limit: parseInt(limit),
+      status,
+      sortBy,
+      sortOrder
+    };
     
-    // Filter by status if provided
-    if (status && ['draft', 'published', 'archived'].includes(status)) {
-      query = query.where('status', '==', status);
+    const result = await getUserLandingPages(req.user.uid, options);
+    
+    if (!result.success) {
+      return res.status(500).json(result);
     }
     
-    // Apply pagination
-    const offset = (parseInt(page) - 1) * parseInt(limit);
-    query = query.offset(offset).limit(parseInt(limit));
-    
-    const snapshot = await query.get();
-    const landingPages = [];
-    
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      landingPages.push({
-        id: doc.id,
-        title: data.title,
-        status: data.status,
-        url: data.url,
-        createdAt: data.createdAt,
-        updatedAt: data.updatedAt,
-        analytics: data.analytics,
-        aiMetadata: {
-          model: data.aiMetadata?.model,
-          processingTime: data.aiMetadata?.processingTime
-        }
-      });
-    });
-    
-    // Get total count for pagination
-    const totalQuery = db.collection('landingPages').where('userId', '==', req.user.uid);
-    const totalSnapshot = await totalQuery.get();
-    const total = totalSnapshot.size;
-    
-    res.json({
-      success: true,
-      data: {
-        landingPages,
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total,
-          totalPages: Math.ceil(total / parseInt(limit))
-        }
-      }
-    });
+    res.json(result);
     
   } catch (error) {
     console.error('List landing pages error:', error.message);
@@ -235,39 +225,15 @@ router.get('/list', requireAuth, async (req, res) => {
 // GET /api/landing-pages/:id - Get specific landing page
 router.get('/:id', requireAuth, async (req, res) => {
   try {
-    const db = getFirestore();
-    const doc = await db.collection('landingPages').doc(req.params.id).get();
+    const result = await getLandingPageById(req.params.id, req.user.uid);
     
-    if (!doc.exists) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: 'NOT_FOUND',
-          message: 'Landing page not found'
-        }
-      });
+    if (!result.success) {
+      const statusCode = result.error.code === 'NOT_FOUND' ? 404 : 
+                        result.error.code === 'ACCESS_DENIED' ? 403 : 500;
+      return res.status(statusCode).json(result);
     }
     
-    const data = doc.data();
-    
-    // Check if user owns this landing page
-    if (data.userId !== req.user.uid) {
-      return res.status(403).json({
-        success: false,
-        error: {
-          code: 'ACCESS_DENIED',
-          message: 'You do not have access to this landing page'
-        }
-      });
-    }
-    
-    res.json({
-      success: true,
-      data: {
-        id: doc.id,
-        ...data
-      }
-    });
+    res.json(result);
     
   } catch (error) {
     console.error('Get landing page error:', error.message);
@@ -284,56 +250,17 @@ router.get('/:id', requireAuth, async (req, res) => {
 // PUT /api/landing-pages/:id - Update landing page
 router.put('/:id', requireAuth, async (req, res) => {
   try {
-    const db = getFirestore();
-    const docRef = db.collection('landingPages').doc(req.params.id);
-    const doc = await docRef.get();
+    const result = await updateLandingPage(req.params.id, req.user.uid, req.body);
     
-    if (!doc.exists) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: 'NOT_FOUND',
-          message: 'Landing page not found'
-        }
-      });
+    if (!result.success) {
+      const statusCode = result.error.code === 'NOT_FOUND' ? 404 : 
+                        result.error.code === 'ACCESS_DENIED' ? 403 : 
+                        result.error.code === 'VALIDATION_ERROR' ? 400 : 500;
+      return res.status(statusCode).json(result);
     }
-    
-    const data = doc.data();
-    
-    // Check if user owns this landing page
-    if (data.userId !== req.user.uid) {
-      return res.status(403).json({
-        success: false,
-        error: {
-          code: 'ACCESS_DENIED',
-          message: 'You do not have access to this landing page'
-        }
-      });
-    }
-    
-    // Prepare update data
-    const allowedUpdates = ['title', 'status', 'generatedCode'];
-    const updateData = {};
-    
-    allowedUpdates.forEach(field => {
-      if (req.body[field] !== undefined) {
-        updateData[field] = req.body[field];
-      }
-    });
-    
-    updateData.updatedAt = new Date();
-    
-    await docRef.update(updateData);
-    
-    // Get updated document
-    const updatedDoc = await docRef.get();
     
     res.json({
-      success: true,
-      data: {
-        id: updatedDoc.id,
-        ...updatedDoc.data()
-      },
+      ...result,
       message: 'Landing page updated successfully'
     });
     
@@ -352,39 +279,15 @@ router.put('/:id', requireAuth, async (req, res) => {
 // DELETE /api/landing-pages/:id - Delete landing page
 router.delete('/:id', requireAuth, async (req, res) => {
   try {
-    const db = getFirestore();
-    const docRef = db.collection('landingPages').doc(req.params.id);
-    const doc = await docRef.get();
+    const result = await deleteLandingPage(req.params.id, req.user.uid);
     
-    if (!doc.exists) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: 'NOT_FOUND',
-          message: 'Landing page not found'
-        }
-      });
+    if (!result.success) {
+      const statusCode = result.error.code === 'NOT_FOUND' ? 404 : 
+                        result.error.code === 'ACCESS_DENIED' ? 403 : 500;
+      return res.status(statusCode).json(result);
     }
     
-    const data = doc.data();
-    
-    // Check if user owns this landing page
-    if (data.userId !== req.user.uid) {
-      return res.status(403).json({
-        success: false,
-        error: {
-          code: 'ACCESS_DENIED',
-          message: 'You do not have access to this landing page'
-        }
-      });
-    }
-    
-    await docRef.delete();
-    
-    res.json({
-      success: true,
-      message: 'Landing page deleted successfully'
-    });
+    res.json(result);
     
   } catch (error) {
     console.error('Delete landing page error:', error.message);
@@ -398,34 +301,43 @@ router.delete('/:id', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/landing-pages/:id/analytics - Get landing page analytics
+router.get('/:id/analytics', requireAuth, async (req, res) => {
+  try {
+    const result = await getLandingPageAnalytics(req.params.id, req.user.uid);
+    
+    if (!result.success) {
+      const statusCode = result.error.code === 'NOT_FOUND' ? 404 : 
+                        result.error.code === 'ACCESS_DENIED' ? 403 : 500;
+      return res.status(statusCode).json(result);
+    }
+    
+    res.json(result);
+    
+  } catch (error) {
+    console.error('Get landing page analytics error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'ANALYTICS_ERROR',
+        message: 'Failed to retrieve analytics data'
+      }
+    });
+  }
+});
+
 // GET /api/landing-pages/:id/preview - Get landing page preview
 router.get('/:id/preview', requireAuth, async (req, res) => {
   try {
-    const db = getFirestore();
-    const doc = await db.collection('landingPages').doc(req.params.id).get();
+    const result = await getLandingPageById(req.params.id, req.user.uid);
     
-    if (!doc.exists) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: 'NOT_FOUND',
-          message: 'Landing page not found'
-        }
-      });
+    if (!result.success) {
+      const statusCode = result.error.code === 'NOT_FOUND' ? 404 : 
+                        result.error.code === 'ACCESS_DENIED' ? 403 : 500;
+      return res.status(statusCode).json(result);
     }
     
-    const data = doc.data();
-    
-    // Check if user owns this landing page
-    if (data.userId !== req.user.uid) {
-      return res.status(403).json({
-        success: false,
-        error: {
-          code: 'ACCESS_DENIED',
-          message: 'You do not have access to this landing page'
-        }
-      });
-    }
+    const data = result.data;
     
     // Combine HTML, CSS, and JavaScript into a complete page
     const { html, css, javascript } = data.generatedCode;

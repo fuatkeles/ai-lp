@@ -1,82 +1,46 @@
 const { getUserProfile, refreshUserSession } = require('../../services/authService');
 
-// Get user profile endpoint
+// Get user profile
 const getProfile = async (req, res) => {
   try {
-    if (!req.user || !req.user.uid) {
-      return res.status(401).json({
-        success: false,
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'User not authenticated'
-        }
-      });
-    }
+    const uid = req.user.uid;
     
-    // Get user profile from database
-    const profileResult = await getUserProfile(req.user.uid);
+    const profileResult = await getUserProfile(uid);
     
     if (!profileResult.success) {
-      const statusCode = profileResult.error.code === 'USER_NOT_FOUND' ? 404 : 500;
-      return res.status(statusCode).json({
-        success: false,
-        error: profileResult.error
-      });
+      return res.status(404).json(profileResult);
     }
     
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
-      data: {
-        user: profileResult.user
-      }
+      user: profileResult.user,
+      message: 'Profile retrieved successfully'
     });
     
   } catch (error) {
-    console.error('Get profile endpoint error:', error.message);
-    return res.status(500).json({
+    console.error('Get profile error:', error.message);
+    res.status(500).json({
       success: false,
       error: {
-        code: 'INTERNAL_SERVER_ERROR',
+        code: 'PROFILE_ERROR',
         message: 'Failed to get user profile'
       }
     });
   }
 };
 
-// Refresh user session endpoint
+// Refresh user session
 const refreshSession = async (req, res) => {
   try {
-    if (!req.user || !req.user.uid) {
-      return res.status(401).json({
-        success: false,
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'User not authenticated'
-        }
-      });
-    }
+    const uid = req.user.uid;
     
-    // Refresh user session
-    const sessionResult = await refreshUserSession(req.user.uid);
+    const sessionResult = await refreshUserSession(uid);
     
     if (!sessionResult.success) {
-      return res.status(500).json({
-        success: false,
-        error: sessionResult.error
-      });
+      return res.status(400).json(sessionResult);
     }
     
-    // Update HTTP-only cookie
-    const cookieOptions = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-    };
-    
-    res.cookie('auth_token', sessionResult.token, cookieOptions);
-    
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
       data: {
         user: sessionResult.user,
@@ -86,38 +50,34 @@ const refreshSession = async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Refresh session endpoint error:', error.message);
-    return res.status(500).json({
+    console.error('Refresh session error:', error.message);
+    res.status(500).json({
       success: false,
       error: {
-        code: 'INTERNAL_SERVER_ERROR',
+        code: 'REFRESH_ERROR',
         message: 'Failed to refresh session'
       }
     });
   }
 };
 
-// Logout endpoint
+// Logout user
 const logout = async (req, res) => {
   try {
-    // Clear the auth cookie
-    res.clearCookie('auth_token', {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict'
-    });
+    // For JWT tokens, we don't need to do anything server-side
+    // The client will remove the token from localStorage
     
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
       message: 'Logged out successfully'
     });
     
   } catch (error) {
-    console.error('Logout endpoint error:', error.message);
-    return res.status(500).json({
+    console.error('Logout error:', error.message);
+    res.status(500).json({
       success: false,
       error: {
-        code: 'INTERNAL_SERVER_ERROR',
+        code: 'LOGOUT_ERROR',
         message: 'Failed to logout'
       }
     });

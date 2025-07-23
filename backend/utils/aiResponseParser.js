@@ -1,4 +1,5 @@
 const { JSDOM } = require('jsdom');
+const { sanitizeHTML, sanitizeCSS, sanitizeJavaScript } = require('./codeSanitizer');
 
 // Parse AI response and extract HTML, CSS, JavaScript
 const parseAIResponse = (aiContent) => {
@@ -38,26 +39,62 @@ const parseAIResponse = (aiContent) => {
 // Try to parse response as JSON
 const tryParseAsJSON = (content) => {
   try {
-    // Look for JSON object in the content
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    // Clean the content first - remove markdown code blocks if present
+    let cleanContent = content.trim();
+    
+    // Remove markdown code block markers
+    cleanContent = cleanContent.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+    
+    // Handle HTML-encoded quotes and other entities more comprehensively
+    cleanContent = cleanContent
+      .replace(/\\&quot;/g, '"')
+      .replace(/&quot;/g, '"')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&#x27;/g, "'")
+      .replace(/&#x2F;/g, '/')
+      .replace(/&#39;/g, "'")
+      .replace(/&apos;/g, "'")
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&copy;/g, '©')
+      .replace(/&reg;/g, '®')
+      .replace(/&trade;/g, '™');
+    
+    // Look for JSON object in the content - more flexible regex
+    const jsonMatch = cleanContent.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       return { success: false };
     }
     
-    const jsonStr = jsonMatch[0];
-    const parsed = JSON.parse(jsonStr);
+    cleanContent = jsonMatch[0];
+    
+    // Fix common JSON issues
+    cleanContent = cleanContent
+      .replace(/,\s*}/g, '}')  // Remove trailing commas
+      .replace(/,\s*]/g, ']'); // Remove trailing commas in arrays
+    
+    // Try to fix escaped quotes in HTML content
+    cleanContent = fixEscapedQuotesInJSON(cleanContent);
+    
+    const parsed = JSON.parse(cleanContent);
     
     // Validate required fields
-    if (!parsed.html || !parsed.css) {
+    if (!parsed.html) {
       return { success: false };
     }
+    
+    // Decode HTML entities in the parsed content
+    const decodedHtml = decodeHTMLEntities(parsed.html);
+    const decodedCss = decodeHTMLEntities(parsed.css || '');
+    const decodedJs = decodeHTMLEntities(parsed.javascript || '');
     
     return {
       success: true,
       data: {
-        html: cleanHTML(parsed.html),
-        css: cleanCSS(parsed.css),
-        javascript: cleanJavaScript(parsed.javascript || ''),
+        html: cleanHTML(decodedHtml),
+        css: cleanCSS(decodedCss),
+        javascript: cleanJavaScript(decodedJs),
         metadata: {
           parseMethod: 'json',
           originalLength: content.length
@@ -66,6 +103,147 @@ const tryParseAsJSON = (content) => {
     };
     
   } catch (error) {
+    console.log('JSON parse error:', error.message);
+    // If JSON parsing fails, try to extract HTML directly from the response
+    return tryParseAsDirectHTML(content);
+  }
+};
+
+// Fix escaped quotes in JSON strings containing HTML
+const fixEscapedQuotesInJSON = (jsonString) => {
+  try {
+    // This is a more sophisticated approach to handle escaped quotes in HTML content
+    // We'll look for the pattern: "html": "..." and fix quotes within the HTML string
+    
+    const htmlMatch = jsonString.match(/"html"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    if (htmlMatch) {
+      let htmlContent = htmlMatch[1];
+      // Fix common escaping issues in HTML content
+      htmlContent = htmlContent
+        .replace(/\\"/g, '"')  // Unescape quotes
+        .replace(/\\\\/g, '\\'); // Fix double backslashes
+      
+      // Replace the original HTML content with the fixed version
+      jsonString = jsonString.replace(htmlMatch[0], `"html": ${JSON.stringify(htmlContent)}`);
+    }
+    
+    const cssMatch = jsonString.match(/"css"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    if (cssMatch) {
+      let cssContent = cssMatch[1];
+      cssContent = cssContent
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, '\\');
+      
+      jsonString = jsonString.replace(cssMatch[0], `"css": ${JSON.stringify(cssContent)}`);
+    }
+    
+    const jsMatch = jsonString.match(/"javascript"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    if (jsMatch) {
+      let jsContent = jsMatch[1];
+      jsContent = jsContent
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, '\\');
+      
+      jsonString = jsonString.replace(jsMatch[0], `"javascript": ${JSON.stringify(jsContent)}`);
+    }
+    
+    return jsonString;
+  } catch (error) {
+    console.log('Error fixing escaped quotes:', error.message);
+    return jsonString;
+  }
+};
+
+// Decode HTML entities
+const decodeHTMLEntities = (text) => {
+  if (!text) return '';
+  
+  const entityMap = {
+    '&amp;': '&',
+    '&lt;': '<',
+    '&gt;': '>',
+    '&quot;': '"',
+    '&#39;': "'",
+    '&apos;': "'",
+    '&nbsp;': ' ',
+    '&copy;': '©',
+    '&reg;': '®',
+    '&trade;': '™',
+    '&hellip;': '…',
+    '&mdash;': '—',
+    '&ndash;': '–',
+    '&lsquo;': "'",
+    '&rsquo;': "'",
+    '&ldquo;': '"',
+    '&rdquo;': '"'
+  };
+  
+  let decoded = text;
+  for (const [entity, char] of Object.entries(entityMap)) {
+    decoded = decoded.replace(new RegExp(entity, 'g'), char);
+  }
+  
+  // Handle numeric entities
+  decoded = decoded.replace(/&#(\d+);/g, (match, dec) => {
+    return String.fromCharCode(dec);
+  });
+  
+  decoded = decoded.replace(/&#x([0-9a-f]+);/gi, (match, hex) => {
+    return String.fromCharCode(parseInt(hex, 16));
+  });
+  
+  return decoded;
+};
+
+// Try to parse response as direct HTML (when AI returns HTML instead of JSON)
+const tryParseAsDirectHTML = (content) => {
+  try {
+    // Clean the content first
+    let cleanContent = content.trim();
+    
+    // Handle HTML-encoded quotes and other entities
+    cleanContent = cleanContent
+      .replace(/\\&quot;/g, '"')
+      .replace(/&quot;/g, '"')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&#x27;/g, "'")
+      .replace(/&#x2F;/g, '/');
+    
+    // Look for HTML content - check if it starts with HTML tags
+    const htmlMatch = cleanContent.match(/<html[\s\S]*<\/html>|<!DOCTYPE[\s\S]*<\/html>/i);
+    
+    if (htmlMatch) {
+      const htmlContent = htmlMatch[0];
+      
+      // Try to extract CSS from style tags
+      const styleMatch = htmlContent.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
+      const cssContent = styleMatch ? styleMatch[1] : '';
+      
+      // Try to extract JavaScript from script tags
+      const scriptMatch = htmlContent.match(/<script[^>]*>([\s\S]*?)<\/script>/i);
+      const jsContent = scriptMatch ? scriptMatch[1] : '';
+      
+      return {
+        success: true,
+        data: {
+          html: cleanHTML(htmlContent),
+          css: cleanCSS(cssContent),
+          javascript: cleanJavaScript(jsContent),
+          metadata: {
+            parseMethod: 'direct-html',
+            originalLength: content.length,
+            warning: 'Parsed HTML directly from AI response (not JSON format)'
+          }
+        }
+      };
+    }
+    
+    return { success: false };
+    
+  } catch (error) {
+    console.log('Direct HTML parse error:', error.message);
     return { success: false };
   }
 };
@@ -173,112 +351,30 @@ const extractHTMLContent = (content) => {
 
 // Clean and validate HTML content
 const cleanHTML = (html) => {
-  if (!html || typeof html !== 'string') {
-    return '';
-  }
-  
-  try {
-    // Preserve DOCTYPE if present
-    const hasDoctype = html.trim().toLowerCase().startsWith('<!doctype');
-    
-    // Use JSDOM to parse and clean HTML
-    const dom = new JSDOM(html);
-    const document = dom.window.document;
-    
-    // Remove potentially dangerous elements
-    const dangerousElements = document.querySelectorAll('script, iframe, object, embed, form[action]');
-    dangerousElements.forEach(el => el.remove());
-    
-    // Remove dangerous attributes
-    const allElements = document.querySelectorAll('*');
-    allElements.forEach(el => {
-      // Remove event handlers
-      const attributes = [...el.attributes];
-      attributes.forEach(attr => {
-        if (attr.name.startsWith('on') || attr.name === 'href' && attr.value.startsWith('javascript:')) {
-          el.removeAttribute(attr.name);
-        }
-      });
-    });
-    
-    // Get cleaned HTML
-    let cleanedHTML = document.documentElement.outerHTML;
-    
-    // Add DOCTYPE back if it was present originally
-    if (hasDoctype && !cleanedHTML.toLowerCase().startsWith('<!doctype')) {
-      cleanedHTML = '<!DOCTYPE html>\n' + cleanedHTML;
-    }
-    
-    // Add viewport meta tag if missing
-    if (!cleanedHTML.includes('viewport')) {
-      cleanedHTML = cleanedHTML.replace(
-        '<head>',
-        '<head>\n    <meta name="viewport" content="width=device-width, initial-scale=1.0">'
-      );
-    }
-    
-    return cleanedHTML;
-    
-  } catch (error) {
-    console.error('HTML cleaning error:', error.message);
-    // Return original if cleaning fails
-    return html;
-  }
+  return sanitizeHTML(html, {
+    allowForms: true,        // Allow forms for lead capture
+    allowScripts: true,      // Allow scripts for functionality
+    allowExternalLinks: true, // Allow external links
+    preserveDoctype: true
+  });
 };
 
 // Clean and validate CSS content
 const cleanCSS = (css) => {
-  if (!css || typeof css !== 'string') {
-    return '';
-  }
-  
-  try {
-    // Remove potentially dangerous CSS
-    let cleanedCSS = css
-      .replace(/@import\s+url\([^)]*\);?/gi, '') // Remove @import statements
-      .replace(/expression\s*\([^)]*\)/gi, '') // Remove CSS expressions
-      .replace(/javascript:/gi, '') // Remove javascript: in CSS
-      .replace(/behavior\s*:/gi, 'removed-behavior:'); // Remove IE behaviors
-    
-    // Add basic responsive styles if missing
-    if (!cleanedCSS.includes('@media')) {
-      cleanedCSS += `\n\n/* Basic responsive styles */
-@media (max-width: 768px) {
-  body { font-size: 14px; }
-  .container { padding: 10px; }
-}`;
-    }
-    
-    return cleanedCSS.trim();
-    
-  } catch (error) {
-    console.error('CSS cleaning error:', error.message);
-    return css;
-  }
+  return sanitizeCSS(css, {
+    allowImports: false,
+    allowExpressions: false
+  });
 };
 
 // Clean and validate JavaScript content
 const cleanJavaScript = (js) => {
-  if (!js || typeof js !== 'string') {
-    return '';
-  }
-  
-  try {
-    // Remove potentially dangerous JavaScript
-    let cleanedJS = js
-      .replace(/eval\s*\(/gi, 'removed_eval(') // Remove eval
-      .replace(/Function\s*\(/gi, 'removed_Function(') // Remove Function constructor
-      .replace(/setTimeout\s*\(\s*["'`][^"'`]*["'`]/gi, '') // Remove setTimeout with string
-      .replace(/setInterval\s*\(\s*["'`][^"'`]*["'`]/gi, '') // Remove setInterval with string
-      .replace(/document\.write/gi, 'removed_document_write') // Remove document.write
-      .replace(/innerHTML\s*=/gi, 'textContent ='); // Replace innerHTML with textContent
-    
-    return cleanedJS.trim();
-    
-  } catch (error) {
-    console.error('JavaScript cleaning error:', error.message);
-    return js;
-  }
+  return sanitizeJavaScript(js, {
+    allowEval: false,
+    allowDOM: true,         // Allow DOM manipulation for interactivity
+    allowAjax: false,
+    allowWindowAccess: true  // Allow window access for basic functionality
+  });
 };
 
 // Generate basic HTML structure from text

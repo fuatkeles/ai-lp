@@ -1,206 +1,53 @@
-const Joi = require('joi');
+const { validateInput, sanitizeInput } = require('./validation');
 
-// Validation schema for landing page generation request
-const landingPagePromptSchema = Joi.object({
-  prompt: Joi.string()
-    .min(10)
-    .max(2000)
-    .required()
-    .messages({
-      'string.empty': 'Prompt cannot be empty',
-      'string.min': 'Prompt must be at least 10 characters long',
-      'string.max': 'Prompt cannot exceed 2000 characters',
-      'any.required': 'Prompt is required'
-    }),
-  
-  title: Joi.string()
-    .min(3)
-    .max(100)
-    .optional()
-    .messages({
-      'string.min': 'Title must be at least 3 characters long',
-      'string.max': 'Title cannot exceed 100 characters'
-    }),
-    
-  options: Joi.object({
-    temperature: Joi.number().min(0).max(2).optional(),
-    maxTokens: Joi.number().min(100).max(8000).optional(),
-    topP: Joi.number().min(0).max(1).optional(),
-    style: Joi.string().valid('modern', 'classic', 'minimal', 'creative').optional(),
-    industry: Joi.string().max(50).optional(),
-    targetAudience: Joi.string().max(100).optional()
-  }).optional()
-});
-
-// Validate landing page generation request
-const validateLandingPageRequest = (requestData) => {
-  const { error, value } = landingPagePromptSchema.validate(requestData, {
-    abortEarly: false,
-    stripUnknown: true
-  });
-  
-  if (error) {
-    return {
-      success: false,
-      error: {
-        code: 'VALIDATION_ERROR',
-        message: 'Invalid request data',
-        details: error.details.map(detail => ({
-          field: detail.path.join('.'),
-          message: detail.message
-        }))
-      }
-    };
-  }
-  
-  return {
-    success: true,
-    data: value
-  };
-};
-
-// Clean and sanitize prompt text
-const sanitizePrompt = (prompt) => {
-  if (!prompt || typeof prompt !== 'string') {
-    return '';
-  }
-  
-  // Remove potentially harmful content
-  let cleaned = prompt
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '') // Remove script tags
-    .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '') // Remove iframe tags
-    .replace(/javascript:/gi, '') // Remove javascript: protocols
-    .replace(/on\w+\s*=/gi, '') // Remove event handlers
-    .trim();
-  
-  // Normalize whitespace
-  cleaned = cleaned.replace(/\s+/g, ' ');
-  
-  return cleaned;
-};
-
-// Enhance prompt with context and instructions
-const enhancePrompt = (originalPrompt, options = {}) => {
-  const sanitized = sanitizePrompt(originalPrompt);
-  
-  if (!sanitized) {
-    throw new Error('Prompt cannot be empty after sanitization');
-  }
-  
-  // Build enhanced prompt with context
-  let enhancedPrompt = `Create a landing page for: ${sanitized}`;
-  
-  // Add style preferences
-  if (options.style) {
-    enhancedPrompt += `\n\nDesign Style: ${options.style}`;
-  }
-  
-  // Add industry context
-  if (options.industry) {
-    enhancedPrompt += `\n\nIndustry: ${options.industry}`;
-  }
-  
-  // Add target audience
-  if (options.targetAudience) {
-    enhancedPrompt += `\n\nTarget Audience: ${options.targetAudience}`;
-  }
-  
-  // Add specific requirements
-  enhancedPrompt += `\n\nSpecific Requirements:
-- Make it conversion-focused with clear call-to-action buttons
-- Ensure mobile-first responsive design
-- Include modern animations and micro-interactions
-- Use professional color schemes and typography
-- Add social proof elements if relevant
-- Optimize for fast loading and good SEO
-- Include contact forms or lead capture if appropriate`;
-  
-  return enhancedPrompt;
-};
-
-// Extract keywords from prompt for categorization
-const extractKeywords = (prompt) => {
-  if (!prompt || typeof prompt !== 'string') {
-    return [];
-  }
-  
-  // Common business/industry keywords
-  const businessKeywords = [
-    'restaurant', 'food', 'cafe', 'coffee', 'hotel', 'travel', 'tourism',
-    'fitness', 'gym', 'health', 'medical', 'doctor', 'clinic',
-    'education', 'school', 'course', 'training', 'learning',
-    'technology', 'software', 'app', 'saas', 'startup',
-    'ecommerce', 'shop', 'store', 'product', 'service',
-    'consulting', 'agency', 'marketing', 'design', 'creative',
-    'real estate', 'property', 'construction', 'architecture',
-    'finance', 'banking', 'investment', 'insurance',
-    'automotive', 'car', 'vehicle', 'repair', 'maintenance',
-    'beauty', 'salon', 'spa', 'wellness', 'cosmetics'
-  ];
-  
-  const lowerPrompt = prompt.toLowerCase();
-  const foundKeywords = businessKeywords.filter(keyword => 
-    lowerPrompt.includes(keyword)
-  );
-  
-  return foundKeywords;
-};
-
-// Detect prompt language (basic detection)
-const detectLanguage = (prompt) => {
-  if (!prompt || typeof prompt !== 'string') {
-    return 'en';
-  }
-  
-  // Simple language detection based on character patterns
-  const turkishChars = /[çğıöşüÇĞIİÖŞÜ]/;
-  const turkishWords = /\b(ve|bir|bu|için|ile|olan|olan|değil|çok|daha|en|her|kendi|sonra|kadar|ancak|böyle|şey|zaman|yer|kişi|gün|yıl|el|göz|baş|iş|ev|su|kan|yol|para|halk|devlet|millet|ülke|dünya)\b/i;
-  
-  if (turkishChars.test(prompt) || turkishWords.test(prompt)) {
-    return 'tr';
-  }
-  
-  return 'en'; // Default to English
-};
-
-// Validate and process complete request
+// Enhanced prompt processing for better AI responses
 const processLandingPageRequest = (requestData) => {
   try {
-    // First validate the request structure
-    const validation = validateLandingPageRequest(requestData);
-    if (!validation.success) {
-      return validation;
+    const { prompt, title, options = {} } = requestData;
+    
+    // Validate input
+    if (!prompt || !title) {
+      return {
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Prompt and title are required'
+        }
+      };
     }
     
-    const { prompt, title, options = {} } = validation.data;
+    // Sanitize inputs
+    const sanitizedPrompt = sanitizeInput(prompt);
+    const sanitizedTitle = sanitizeInput(title);
     
-    // Process and enhance the prompt
-    const enhancedPrompt = enhancePrompt(prompt, options);
-    const keywords = extractKeywords(prompt);
-    const language = detectLanguage(prompt);
+    // Extract special codes and widgets from prompt
+    const specialCodes = extractSpecialCodes(sanitizedPrompt);
     
-    // Prepare final request data
-    const processedData = {
-      originalPrompt: prompt,
-      enhancedPrompt,
-      title: title || generateTitleFromPrompt(prompt),
-      options: {
-        temperature: options.temperature || 0.7,
-        maxTokens: options.maxTokens || 4000,
-        topP: options.topP || 0.9,
-        ...options
-      },
-      metadata: {
-        keywords,
-        language,
-        promptLength: prompt.length,
-        processedAt: new Date().toISOString()
-      }
+    // Build enhanced prompt with better instructions
+    const enhancedPrompt = buildEnhancedPrompt({
+      originalPrompt: sanitizedPrompt,
+      title: sanitizedTitle,
+      specialCodes,
+      options
+    });
+    
+    // Generate metadata for tracking
+    const metadata = {
+      originalPromptLength: prompt.length,
+      enhancedPromptLength: enhancedPrompt.length,
+      specialCodesFound: Object.keys(specialCodes).length,
+      processingTime: Date.now()
     };
     
     return {
       success: true,
-      data: processedData
+      data: {
+        enhancedPrompt,
+        title: sanitizedTitle,
+        options,
+        metadata,
+        specialCodes
+      }
     };
     
   } catch (error) {
@@ -215,42 +62,162 @@ const processLandingPageRequest = (requestData) => {
   }
 };
 
-// Generate a title from prompt if not provided
-const generateTitleFromPrompt = (prompt) => {
-  if (!prompt || typeof prompt !== 'string') {
-    return 'Generated Landing Page';
+// Extract special codes like iframes, embeds, widgets from prompt
+const extractSpecialCodes = (prompt) => {
+  const specialCodes = {};
+  
+  // Extract iframe codes
+  const iframeMatches = prompt.match(/<iframe[^>]*>.*?<\/iframe>/gi);
+  if (iframeMatches) {
+    specialCodes.iframes = iframeMatches;
   }
   
-  // Extract first meaningful part of prompt
-  const words = prompt.trim().split(/\s+/).slice(0, 6);
-  let title = words.join(' ');
-  
-  // Capitalize first letter
-  title = title.charAt(0).toUpperCase() + title.slice(1);
-  
-  // Ensure reasonable length
-  if (title.length > 50) {
-    title = title.substring(0, 47) + '...';
+  // Extract script tags
+  const scriptMatches = prompt.match(/<script[^>]*>.*?<\/script>/gi);
+  if (scriptMatches) {
+    specialCodes.scripts = scriptMatches;
   }
   
-  return title || 'Generated Landing Page';
+  // Extract YouTube video URLs
+  const youtubeMatches = prompt.match(/https:\/\/www\.youtube\.com\/watch\?v=[\w-]+(&t=\d+s)?/gi);
+  if (youtubeMatches) {
+    specialCodes.youtubeVideos = youtubeMatches;
+  }
+  
+  // Extract image URLs
+  const imageMatches = prompt.match(/https:\/\/[^\s]+\.(jpg|jpeg|png|webp|svg)/gi);
+  if (imageMatches) {
+    specialCodes.images = imageMatches;
+  }
+  
+  // Extract anchor tags with specific patterns
+  const anchorMatches = prompt.match(/<a[^>]*href="[^"]*"[^>]*>.*?<\/a>/gi);
+  if (anchorMatches) {
+    specialCodes.anchors = anchorMatches;
+  }
+  
+  return specialCodes;
 };
 
-// Check for inappropriate content (basic filter)
-const checkContentPolicy = (prompt) => {
-  if (!prompt || typeof prompt !== 'string') {
-    return { allowed: true };
+// Build enhanced prompt with better AI instructions
+const buildEnhancedPrompt = ({ originalPrompt, title, specialCodes, options }) => {
+  let enhancedPrompt = `Create a professional, conversion-focused landing page with the following specifications:
+
+CRITICAL REQUIREMENTS:
+1. You MUST respond with ONLY a valid JSON object in this EXACT format:
+{
+  "html": "complete HTML code here",
+  "css": "complete CSS code here",
+  "javascript": "complete JavaScript code here"
+}
+
+2. The HTML must be a complete, single-file landing page with:
+   - DOCTYPE html declaration
+   - Complete head section with meta tags
+   - All CSS embedded in <style> tags within the head
+   - All JavaScript embedded in <script> tags before closing </body>
+   - Mobile-responsive design
+   - Professional, modern styling
+
+3. MANDATORY ELEMENTS TO INCLUDE:
+
+`;
+
+  // Add special codes with specific instructions
+  if (specialCodes.iframes && specialCodes.iframes.length > 0) {
+    enhancedPrompt += `
+FORMS AND IFRAMES:
+You MUST include these exact iframe codes in the HTML:
+${specialCodes.iframes.map(iframe => `- ${iframe}`).join('\n')}
+
+Place the main form iframe in the hero section and create a popup version that triggers after 10 seconds.
+`;
   }
-  
-  // Basic inappropriate content patterns
-  const inappropriatePatterns = [
-    /\b(hack|crack|pirate|illegal|fraud|scam)\b/i,
-    /\b(adult|porn|sex|nude|explicit)\b/i,
-    /\b(violence|weapon|bomb|kill|murder)\b/i,
-    /\b(drug|cocaine|heroin|marijuana)\b/i
+
+  if (specialCodes.scripts && specialCodes.scripts.length > 0) {
+    enhancedPrompt += `
+REQUIRED SCRIPTS:
+You MUST include these exact script tags:
+${specialCodes.scripts.map(script => `- ${script}`).join('\n')}
+`;
+  }
+
+  if (specialCodes.youtubeVideos && specialCodes.youtubeVideos.length > 0) {
+    enhancedPrompt += `
+YOUTUBE TESTIMONIALS:
+Create a testimonials section with embedded YouTube videos from these URLs:
+${specialCodes.youtubeVideos.map(url => {
+      const videoId = url.match(/v=([^&]+)/)?.[1];
+      return `- ${url} (Embed as: <iframe width="560" height="315" src="https://www.youtube.com/embed/${videoId}" frameborder="0" allowfullscreen></iframe>)`;
+    }).join('\n')}
+`;
+  }
+
+  if (specialCodes.images && specialCodes.images.length > 0) {
+    enhancedPrompt += `
+REQUIRED IMAGES:
+You MUST use ONLY these image URLs (do not use any other images):
+${specialCodes.images.map(img => `- ${img}`).join('\n')}
+
+Use these images for:
+- Kitchen gallery section
+- Platform logos section
+- Partner logos section
+- Any other image needs
+`;
+  }
+
+  if (specialCodes.anchors && specialCodes.anchors.length > 0) {
+    enhancedPrompt += `
+REQUIRED LINKS:
+You MUST include these exact anchor tags:
+${specialCodes.anchors.map(anchor => `- ${anchor}`).join('\n')}
+`;
+  }
+
+  // Add the original prompt with enhanced context
+  enhancedPrompt += `
+
+ORIGINAL REQUEST:
+${originalPrompt}
+
+ADDITIONAL REQUIREMENTS:
+- Page title: "${title}"
+- Industry: ${options.industry || 'general'}
+- Target audience: ${options.targetAudience || 'general audience'}
+- Call to action: ${options.callToAction || 'Get Started'}
+
+DESIGN REQUIREMENTS:
+- Modern, professional design with gradients and animations
+- Mobile-first responsive design
+- Fast loading and optimized code
+- Conversion-focused layout with clear CTAs
+- SEO-optimized with proper meta tags
+- Accessibility compliant
+
+TECHNICAL REQUIREMENTS:
+- Single HTML file with embedded CSS and JavaScript
+- No external dependencies except for the provided scripts/iframes
+- Clean, semantic HTML structure
+- Efficient CSS with media queries
+- Vanilla JavaScript for interactions
+- Cross-browser compatibility
+
+Remember: Respond with ONLY the JSON object containing html, css, and javascript properties. No explanations, no markdown, no other text.`;
+
+  return enhancedPrompt;
+};
+
+// Content policy check
+const checkContentPolicy = (prompt) => {
+  const prohibitedPatterns = [
+    /malware|virus|hack/gi,
+    /illegal|fraud|scam/gi,
+    /adult|porn|sexual/gi,
+    /violence|weapon|drug/gi
   ];
   
-  for (const pattern of inappropriatePatterns) {
+  for (const pattern of prohibitedPatterns) {
     if (pattern.test(prompt)) {
       return {
         allowed: false,
@@ -262,13 +229,33 @@ const checkContentPolicy = (prompt) => {
   return { allowed: true };
 };
 
+// Validate prompt quality and completeness
+const validatePromptQuality = (prompt) => {
+  const issues = [];
+  
+  if (prompt.length < 50) {
+    issues.push('Prompt is too short for quality results');
+  }
+  
+  if (prompt.length > 10000) {
+    issues.push('Prompt is too long and may cause processing issues');
+  }
+  
+  if (!prompt.includes('landing page')) {
+    issues.push('Prompt should clearly mention "landing page"');
+  }
+  
+  return {
+    isValid: issues.length === 0,
+    issues,
+    score: Math.max(0, 100 - (issues.length * 20))
+  };
+};
+
 module.exports = {
-  validateLandingPageRequest,
-  sanitizePrompt,
-  enhancePrompt,
-  extractKeywords,
-  detectLanguage,
   processLandingPageRequest,
-  generateTitleFromPrompt,
-  checkContentPolicy
+  extractSpecialCodes,
+  buildEnhancedPrompt,
+  checkContentPolicy,
+  validatePromptQuality
 };

@@ -42,10 +42,12 @@ export const AuthProvider = ({ children }) => {
 
       if (response.data.success) {
         const userData = response.data.data.user;
+        const jwtToken = response.data.data.token;
+        
         setUser(userData);
         
-        // Store token in localStorage for API requests
-        localStorage.setItem('authToken', response.data.data.token);
+        // Store JWT token in localStorage for API requests
+        localStorage.setItem('authToken', jwtToken);
         
         return userData;
       } else {
@@ -74,17 +76,17 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Get user profile from backend
-  const getUserProfile = async (idToken) => {
+  // Get user profile from backend using JWT token
+  const getUserProfile = async (jwtToken) => {
     try {
       const response = await axios.get(`${API_URL}/api/auth/profile`, {
         headers: {
-          Authorization: `Bearer ${idToken}`
+          Authorization: `Bearer ${jwtToken}`
         }
       });
 
       if (response.data.success) {
-        return response.data.data.user;
+        return response.data.user;
       }
       return null;
     } catch (error) {
@@ -98,13 +100,32 @@ export const AuthProvider = ({ children }) => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       try {
         if (firebaseUser) {
-          // User is signed in, get profile from backend
-          const idToken = await firebaseUser.getIdToken();
-          const userProfile = await getUserProfile(idToken);
+          // Check if we already have a JWT token
+          const existingToken = localStorage.getItem('authToken');
+          if (existingToken) {
+            // Try to get user profile with existing JWT token
+            const userProfile = await getUserProfile(existingToken);
+            if (userProfile) {
+              setUser(userProfile);
+              setLoading(false);
+              return;
+            }
+          }
           
-          if (userProfile) {
-            setUser(userProfile);
-            localStorage.setItem('authToken', idToken);
+          // If no valid JWT token, get Firebase ID token and exchange it
+          const idToken = await firebaseUser.getIdToken();
+          
+          // Send to backend to get JWT token
+          const response = await axios.post(`${API_URL}/api/auth/google-login`, {
+            idToken
+          });
+          
+          if (response.data.success) {
+            const userData = response.data.data.user;
+            const jwtToken = response.data.data.token;
+            
+            setUser(userData);
+            localStorage.setItem('authToken', jwtToken);
           } else {
             // If backend doesn't have user, sign out
             await firebaseSignOut(auth);
@@ -133,10 +154,18 @@ export const AuthProvider = ({ children }) => {
     try {
       if (auth.currentUser) {
         const idToken = await auth.currentUser.getIdToken(true);
-        const userProfile = await getUserProfile(idToken);
-        if (userProfile) {
-          setUser(userProfile);
-          localStorage.setItem('authToken', idToken);
+        
+        // Exchange Firebase ID token for JWT token
+        const response = await axios.post(`${API_URL}/api/auth/google-login`, {
+          idToken
+        });
+        
+        if (response.data.success) {
+          const userData = response.data.data.user;
+          const jwtToken = response.data.data.token;
+          
+          setUser(userData);
+          localStorage.setItem('authToken', jwtToken);
         }
       }
     } catch (error) {

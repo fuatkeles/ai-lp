@@ -69,18 +69,36 @@
   - Landing page generation API endpoint'ini oluştur (/api/landing-pages/generate)
   - _Requirements: 1.1, 1.3, 1.4_
 
-- [ ] 6. Landing page data model ve CRUD operasyonlarını implement et
+- [x] 6. Landing page data model ve CRUD operasyonlarını implement et
+
+
+
+
+
   - Firestore'da landing page collection'ını ve data model'ini oluştur
   - Landing page CRUD API endpoint'lerini yaz (list, get, update, delete)
   - Code sanitization ve validation fonksiyonlarını implement et
   - _Requirements: 1.1, 1.2, 6.1_
 
-- [ ] 7. Landing page preview ve generation UI'ını oluştur
+- [x] 7. Landing page preview ve generation UI'ını oluştur
+
+
+
+
+
   - Landing page generation form'unu ve prompt input'unu yaz
   - AI generation loading states ve progress indicator'ları ekle
   - Preview modal/component'ini oluştur
   - Generated code display ve edit functionality'sini implement et
   - _Requirements: 1.1, 6.1, 6.3_
+
+- [ ] 7.1. Advanced prompt processing ve AI response quality'sini iyileştir
+  - Prompt template sistemini oluştur ve özel kod injection'ı ekle
+  - AI response parsing'i iyileştir ve HTML encoding sorunlarını çöz
+  - Özel form kodları, YouTube embeds ve widget'ları prompt'a dahil etme sistemini yap
+  - AI model'lerin verilen özel kodları kullanmasını sağlayacak prompt engineering'i implement et
+  - Response validation ve quality control sistemini kur
+  - _Requirements: 1.1, 1.3, 1.4_
 
 - [ ] 8. Client dashboard'ı ve landing page management'ı yap
   - Dashboard layout'unu ve navigation'ı oluştur

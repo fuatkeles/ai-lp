@@ -2,9 +2,15 @@ import { useAuth } from '../hooks/useAuth';
 import { Card } from '@shared/components/ui/card';
 import { Button } from '@shared/components/ui/button';
 import { Plus, FileText, BarChart3, Sparkles } from 'lucide-react';
+import { useRouter } from 'next/router';
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const router = useRouter();
+
+  const handleNewPage = () => {
+    router.push('/generate');
+  };
 
   return (
     <div className="space-y-8">
@@ -20,7 +26,7 @@ export default function Dashboard() {
 
       {/* Quick Actions */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer">
+        <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer" onClick={handleNewPage}>
           <div className="flex items-center space-x-4">
             <div className="p-2 bg-primary/10 rounded-lg">
               <Plus className="h-6 w-6 text-primary" />
@@ -82,7 +88,7 @@ export default function Dashboard() {
           <div className="text-center py-12 text-muted-foreground">
             <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
             <p>You haven't created any landing pages yet</p>
-            <Button className="mt-4" size="sm">
+            <Button className="mt-4" size="sm" onClick={handleNewPage}>
               <Plus className="h-4 w-4 mr-2" />
               Create Your First Page
             </Button>

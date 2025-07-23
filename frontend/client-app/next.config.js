@@ -49,9 +49,12 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: 'http://localhost:3000/api/:path*',
+        destination: 'http://localhost:8000/api/:path*',
       },
     ];
+  },
+  experimental: {
+    proxyTimeout: 180000, // 3 minutes timeout for proxy requests
   },
 };
 
